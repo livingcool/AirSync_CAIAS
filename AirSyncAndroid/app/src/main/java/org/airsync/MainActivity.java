@@ -42,7 +42,7 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private PreviewView viewFinder;
     private String selectedFilePath;
-    private TransferManager transferManager;
+    private NearbyManager nearbyManager;
     private GestureDetector gestureDetector;
     private ExecutorService cameraExecutor;
 
@@ -58,30 +58,41 @@ public class MainActivity extends AppCompatActivity {
         progressBar = findViewById(R.id.progressBar);
         viewFinder = findViewById(R.id.viewFinder);
 
-        try {
-            transferManager = new TransferManager();
-            String myIp = transferManager.getMyIp();
-            IPLabel.setText("Your IP: " + (myIp != null ? myIp : "Unknown"));
-        } catch (Exception e) {
-            Log.e("AirSync", "IP Discovery Error", e);
-            IPLabel.setText("Your IP: Error");
-            e.printStackTrace();
+        // Hide IP fields as Nearby doesn't need them
+        IPLabel.setVisibility(View.GONE);
+        ipInput.setVisibility(View.GONE);
+
+        // Start AirSync Background Service
+        Intent serviceIntent = new Intent(this, AirSyncService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
         }
 
-        findViewById(R.id.btnSelectFile).setOnClickListener(v -> pickFile());
-        findViewById(R.id.btnReceiveMode).setOnClickListener(v -> enterReceiveMode());
-
-        transferManager.setListener(new TransferManager.TransferListener() {
+        nearbyManager = new NearbyManager(this, Build.MODEL);
+        nearbyManager.setListener(new NearbyManager.NearbyListener() {
             @Override
             public void onFileReceived(String path) {
-                runOnUiThread(() -> statusLabel.setText("Received: " + path));
+                runOnUiThread(() -> statusLabel.setText("Caught file: " + path));
             }
 
             @Override
-            public void onProgressUpdate(int percent) {
-                runOnUiThread(() -> progressBar.setProgress(percent));
+            public void onTransferProgress(long bytesTransferred, long totalBytes) {
+                runOnUiThread(() -> {
+                    int percent = (int) (bytesTransferred * 100 / totalBytes);
+                    progressBar.setProgress(percent);
+                });
+            }
+
+            @Override
+            public void onStatusUpdate(String status) {
+                runOnUiThread(() -> statusLabel.setText(status));
             }
         });
+
+        findViewById(R.id.btnSelectFile).setOnClickListener(v -> pickFile());
+        findViewById(R.id.btnReceiveMode).setOnClickListener(v -> nearbyManager.startDiscovery());
 
         if (allPermissionsGranted()) {
             Toast.makeText(this, "DEBUG: Permissions already granted", Toast.LENGTH_SHORT).show();
@@ -167,18 +178,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleGesture(String gesture) {
+        // Visual Feedback on Gesture Detection
+        View overlay = findViewById(R.id.gestureOverlay);
+        if (overlay != null) {
+            overlay.setAlpha(0.6f);
+            overlay.animate().alpha(0.1f).setDuration(400);
+        }
+
         switch (gesture) {
-            case "SEND":
+            case "GRAB":
                 triggerSend();
                 break;
-            case "RECEIVE":
+            case "RELEASE":
                 enterReceiveMode();
                 break;
             case "CANCEL":
-                statusLabel.setText("Cancelled");
+                statusLabel.setText("Operation Cancelled");
                 break;
             case "CONFIRM":
-                statusLabel.setText("Confirmed!");
+                statusLabel.setText("Action Confirmed!");
                 break;
         }
     }
@@ -204,23 +222,15 @@ public class MainActivity extends AppCompatActivity {
             statusLabel.setText("No file selected!");
             return;
         }
-        String ip = ipInput.getText().toString().trim();
-        if (ip.isEmpty()) {
-            statusLabel.setText("Enter receiver IP first");
-            return;
-        }
-        statusLabel.setText("Sending to " + ip + "...");
-        transferManager.sendFile(ip, selectedFilePath);
+        
+        File file = new File(selectedFilePath);
+        statusLabel.setText("Grabbing " + file.getName() + "...");
+        nearbyManager.startAdvertising();
     }
 
     private void enterReceiveMode() {
-        File dir = getExternalFilesDir(null);
-        if (dir == null) {
-            statusLabel.setText("Storage Error: Files dir not found");
-            return;
-        }
-        statusLabel.setText("Waiting for file...");
-        transferManager.startReceiving(dir.getAbsolutePath());
+        statusLabel.setText("Ready to catch...");
+        nearbyManager.startDiscovery();
     }
 
     private Bitmap toBitmap(androidx.camera.core.ImageProxy image) {
