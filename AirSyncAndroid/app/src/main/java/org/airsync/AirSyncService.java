@@ -40,25 +40,48 @@ public class AirSyncService extends LifecycleService {
             handleGesture(gesture);
         });
 
-        nearbyManager = new NearbyManager(this, Build.MODEL + "_BG");
-        startCamera();
+        nearbyManager = new NearbyManager(this, android.os.Build.MODEL + "_BG");
     }
+
+    public static final String ACTION_START_MONITORING = "org.airsync.action.START_MONITORING";
+    public static final String ACTION_STOP_MONITORING = "org.airsync.action.STOP_MONITORING";
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
         
+        if (intent != null && ACTION_STOP_MONITORING.equals(intent.getAction())) {
+            Log.d("AirSync", "Stopping background camera monitoring");
+            stopCamera();
+        } else {
+            Log.d("AirSync", "Starting background foreground service");
+            startMonitoring();
+        }
+
+        return START_STICKY;
+    }
+
+    private void startMonitoring() {
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("AirSync Active")
-                .setContentText("Monitoring for gestures in the background...")
+                .setContentTitle("AirSync Radar Active")
+                .setContentText("Hands-free transfer ready. Monitoring for gestures...")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
 
         startForeground(NOTIFICATION_ID, notification);
-        
-        Log.d("AirSync", "Foreground Service Started");
-        return START_STICKY;
+        startCamera();
+    }
+
+    private void stopCamera() {
+        Log.d("AirSync", "Service: Releasing camera resource...");
+        try {
+            ProcessCameraProvider cameraProvider = ProcessCameraProvider.getInstance(this).get();
+            cameraProvider.unbindAll();
+            Log.d("AirSync", "Service: Camera unbind complete");
+        } catch (Exception e) {
+            Log.e("AirSync", "Failed to stop camera", e);
+        }
     }
 
     private void startCamera() {
@@ -89,11 +112,52 @@ public class AirSyncService extends LifecycleService {
 
     private void handleGesture(String gesture) {
         if (gesture.equals("GRAB")) {
-            Log.d("AirSync", "GRAB detected - Advertising...");
+            Log.d("AirSync", "GRAB detected - Visualizing and Advertising...");
+            showSystemOverlayAnimation(0xFFBB86FC); // Purple Flash
             nearbyManager.startAdvertising();
         } else if (gesture.equals("RELEASE")) {
-            Log.d("AirSync", "RELEASE detected - Discovering...");
+            Log.d("AirSync", "RELEASE detected - Visualizing and Discovering...");
+            showSystemOverlayAnimation(0xFF03DAC6); // Teal Flash
             nearbyManager.startDiscovery();
+        }
+    }
+
+    private void showSystemOverlayAnimation(int color) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
+                !android.provider.Settings.canDrawOverlays(this)) {
+            return;
+        }
+
+        final android.view.WindowManager windowManager = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
+        if (windowManager == null) return;
+
+        final android.view.View overlay = new android.view.View(this);
+        overlay.setBackgroundColor(color);
+        overlay.setAlpha(0.4f);
+
+        int type = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O ?
+                android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                android.view.WindowManager.LayoutParams.TYPE_PHONE;
+
+        final android.view.WindowManager.LayoutParams params = new android.view.WindowManager.LayoutParams(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                type,
+                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
+                        android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                android.graphics.PixelFormat.TRANSLUCENT
+        );
+
+        try {
+            windowManager.addView(overlay, params);
+            overlay.animate().alpha(0f).setDuration(600).withEndAction(() -> {
+                try {
+                    windowManager.removeView(overlay);
+                } catch (Exception ignored) {}
+            });
+        } catch (Exception e) {
+            Log.e("AirSync", "Overlay failed", e);
         }
     }
 
@@ -133,7 +197,7 @@ public class AirSyncService extends LifecycleService {
     }
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             NotificationChannel serviceChannel = new NotificationChannel(
                     CHANNEL_ID,
                     "AirSync Gesture Service Channel",

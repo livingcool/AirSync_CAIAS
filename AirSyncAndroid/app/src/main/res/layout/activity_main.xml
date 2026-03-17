@@ -1,115 +1,138 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121212">
+    android:background="#0A0A0A">
 
-    <!-- Header / Status Area -->
-    <LinearLayout
-        android:id="@+id/headerArea"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp"
-        android:background="#1E1E1E">
-
-        <TextView
-            android:id="@+id/appTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="AirSync"
-            android:textColor="#BB86FC"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:layout_gravity="center" />
-
-        <TextView
-            android:id="@+id/statusLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Ready for Gesture"
-            android:textColor="#E0E0E0"
-            android:textSize="16sp"
-            android:gravity="center"
-            android:layout_marginTop="8dp" />
-    </LinearLayout>
-
-    <ProgressBar
-        android:id="@+id/progressBar"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="4dp"
-        android:layout_below="@id/headerArea"
-        android:progressDrawable="@android:color/holo_purple" />
-
-    <!-- Camera / Gesture Visualization Area -->
-    <FrameLayout
-        android:id="@+id/viewFinderContainer"
+    <!-- Futuristic Gradient Background -->
+    <View
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_below="@id/progressBar"
-        android:layout_above="@id/bottomControls">
+        android:background="@drawable/bg_gradient_dim" />
+
+    <!-- Camera Preview (Rounded Glass) -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cameraCard"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:cardBackgroundColor="#1AFFFFFF"
+        app:layout_constraintBottom_toTopOf="@+id/controlsCard"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/gestureLabel">
 
         <androidx.camera.view.PreviewView
             android:id="@+id/viewFinder"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            app:scaleType="fillCenter" />
+            android:layout_height="match_parent" />
 
-        <!-- Overlay for Gesture Feedback -->
         <View
             android:id="@+id/gestureOverlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="#40000000"
+            android:background="#33BB86FC"
             android:alpha="0" />
-            
-        <TextView
-            android:id="@+id/gestureLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="32dp"
-            android:text="Gesture: --"
-            android:textColor="#03DAC6"
-            android:textSize="22sp"
-            android:textStyle="italic"
-            android:padding="12dp"
-            android:background="#80000000" />
-    </FrameLayout>
+    </androidx.cardview.widget.CardView>
 
-    <!-- Bottom Actions -->
-    <LinearLayout
-        android:id="@+id/bottomControls"
+    <TextView
+        android:id="@+id/headerText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:fontFamily="sans-serif-medium"
+        android:text="AirSync Radar"
+        android:textColor="#BB86FC"
+        android:textSize="28sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/gestureLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Gesture: --"
+        android:textColor="#03DAC6"
+        android:textSize="16sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/headerText" />
+
+    <!-- Main Controls Card (Glassmorphism) -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/controlsCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:orientation="horizontal"
-        android:padding="16dp"
-        android:background="#1E1E1E">
+        android:layout_margin="16dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="8dp"
+        app:cardBackgroundColor="#1E1E1E"
+        app:layout_constraintBottom_toBottomOf="parent">
 
-        <Button
-            android:id="@+id/btnSelectFile"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="📁 Browse"
-            android:textAllCaps="false"
-            android:layout_marginEnd="8dp"
-            android:backgroundTint="#3700B3" />
+            android:orientation="vertical"
+            android:padding="20dp">
 
-        <Button
-            android:id="@+id/btnReceiveMode"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="📥 Receive"
-            android:textAllCaps="false"
-            android:backgroundTint="#018786" />
-    </LinearLayout>
+            <TextView
+                android:id="@+id/statusLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ready for Gesture Transfer"
+                android:textColor="#E0E0E0"
+                android:textSize="14sp"
+                android:textAlignment="center"
+                android:layout_marginBottom="16dp" />
 
-    <TextView android:id="@+id/ipLabel" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-    <EditText android:id="@+id/ipInput" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+            <ProgressBar
+                android:id="@+id/progressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:progressDrawable="@drawable/custom_progress"
+                android:layout_marginBottom="20dp" />
 
-</RelativeLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnSelectFile"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="Browse"
+                    android:textAllCaps="false"
+                    android:backgroundTint="#6200EE"
+                    android:textColor="#FFFFFF"
+                    app:cornerRadius="16dp"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btnReceiveMode"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="Catch Mode"
+                    android:textAllCaps="false"
+                    android:backgroundTint="#03DAC5"
+                    android:textColor="#121212"
+                    app:cornerRadius="16dp"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <!-- Hidden Legacy Inputs -->
+            <TextView android:id="@+id/ipLabel" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+            <EditText android:id="@+id/ipInput" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone"/>
+
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

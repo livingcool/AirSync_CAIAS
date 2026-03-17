@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -36,15 +37,44 @@ import java.util.concurrent.Executors;
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQ_CODE = 10;
     private static final int FILE_PICKER_CODE = 100;
+    private static final String[] REQUIRED_PERMISSIONS;
+    static {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            REQUIRED_PERMISSIONS = new String[]{
+                Manifest.permission.CAMERA,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.NEARBY_WIFI_DEVICES,
+                Manifest.permission.POST_NOTIFICATIONS,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            };
+        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            REQUIRED_PERMISSIONS = new String[]{
+                Manifest.permission.CAMERA,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            };
+        } else {
+            REQUIRED_PERMISSIONS = new String[]{
+                Manifest.permission.CAMERA,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            };
+        }
+    }
 
-    private TextView statusLabel, IPLabel, gestureLabel;
+    private TextView statusLabel;
+    private TextView IPLabel;
+    private TextView gestureLabel;
     private EditText ipInput;
     private ProgressBar progressBar;
     private PreviewView viewFinder;
-    private String selectedFilePath;
     private NearbyManager nearbyManager;
     private GestureDetector gestureDetector;
     private ExecutorService cameraExecutor;
+    private String selectedFilePath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,19 +88,18 @@ public class MainActivity extends AppCompatActivity {
         progressBar = findViewById(R.id.progressBar);
         viewFinder = findViewById(R.id.viewFinder);
 
+        // Check for System Overlay Permission (Settings prompt)
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        }
+
         // Hide IP fields as Nearby doesn't need them
         IPLabel.setVisibility(View.GONE);
         ipInput.setVisibility(View.GONE);
 
-        // Start AirSync Background Service
-        Intent serviceIntent = new Intent(this, AirSyncService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
-        }
-
-        nearbyManager = new NearbyManager(this, Build.MODEL);
+        nearbyManager = new NearbyManager(this, android.os.Build.MODEL);
         nearbyManager.setListener(new NearbyManager.NearbyListener() {
             @Override
             public void onFileReceived(String path) {
@@ -91,19 +120,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        findViewById(R.id.btnSelectFile).setOnClickListener(v -> pickFile());
-        findViewById(R.id.btnReceiveMode).setOnClickListener(v -> nearbyManager.startDiscovery());
-
-        if (allPermissionsGranted()) {
-            Toast.makeText(this, "DEBUG: Permissions already granted", Toast.LENGTH_SHORT).show();
-            startCamera();
-        } else {
-            Toast.makeText(this, "DEBUG: Requesting permissions", Toast.LENGTH_SHORT).show();
-            ActivityCompat.requestPermissions(this, new String[]{
-                    Manifest.permission.CAMERA}, PERMISSION_REQ_CODE);
-        }
+        // Hide IP fields as Nearby doesn't need them
+        IPLabel.setVisibility(View.GONE);
+        ipInput.setVisibility(View.GONE);
 
         cameraExecutor = Executors.newSingleThreadExecutor();
+
+        if (allPermissionsGranted()) {
+            startCamera();
+        } else {
+            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSION_REQ_CODE);
+        }
     }
 
     @Override
@@ -113,68 +140,85 @@ public class MainActivity extends AppCompatActivity {
             if (allPermissionsGranted()) {
                 startCamera();
             } else {
-                Toast.makeText(this, "Camera permission is required for gesture detection", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Permissions are required for gesture transfer to work.", Toast.LENGTH_LONG).show();
             }
         }
     }
 
     private void startCamera() {
         Log.d("AirSync", "Initializing Camera and GestureDetector...");
-        try {
-            // Initialize MediaPipe GestureDetector
-            gestureDetector = new GestureDetector(this, gesture -> {
-                runOnUiThread(() -> {
-                    gestureLabel.setText("Gesture: " + gesture);
-                    handleGesture(gesture);
+        gestureLabel.setText("Gesture: Initializing...");
+
+        // Start AirSync Background Service with STOP_MONITORING to release camera
+        Intent serviceIntent = new Intent(this, AirSyncService.class);
+        serviceIntent.setAction(AirSyncService.ACTION_STOP_MONITORING);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+
+        // Delay camera binding to ensure service had time to release it
+        viewFinder.postDelayed(() -> {
+            try {
+                // Initialize MediaPipe GestureDetector
+                gestureDetector = new GestureDetector(this, gesture -> {
+                    runOnUiThread(() -> {
+                        gestureLabel.setText("Gesture: " + gesture);
+                        handleGesture(gesture);
+                    });
                 });
-            });
-            Toast.makeText(this, "MediaPipe Model Loaded", Toast.LENGTH_SHORT).show();
 
-            // Start Camera Use Cases
-            ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
-            cameraProviderFuture.addListener(() -> {
-                try {
-                    ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+                ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+                cameraProviderFuture.addListener(() -> {
+                    try {
+                        ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
-                    Preview preview = new Preview.Builder().build();
-                    preview.setSurfaceProvider(viewFinder.getSurfaceProvider());
+                        Preview preview = new Preview.Builder().build();
+                        preview.setSurfaceProvider(viewFinder.getSurfaceProvider());
 
-                    ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build();
+                        ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .build();
 
-                    imageAnalysis.setAnalyzer(cameraExecutor, image -> {
-                        Bitmap bitmap = toBitmap(image);
-                        if (bitmap != null) {
-                            if (gestureDetector != null) {
+                        imageAnalysis.setAnalyzer(cameraExecutor, image -> {
+                            Bitmap bitmap = toBitmap(image);
+                            if (bitmap != null && gestureDetector != null) {
                                 final String debugResult = gestureDetector.processFrame(bitmap);
                                 runOnUiThread(() -> {
-                                    if (debugResult.startsWith("UNKNOWN")) {
-                                        gestureLabel.setText("Gesture: None");
+                                    if (debugResult.startsWith("NONE")) {
+                                        gestureLabel.setText("Gesture: Waiting...");
                                     } else {
                                         gestureLabel.setText("Detected: " + debugResult);
                                     }
                                 });
                             }
-                        }
-                        image.close();
-                    });
+                            image.close();
+                        });
 
-                    CameraSelector cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
-                    cameraProvider.unbindAll();
-                    cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
-                    Log.d("AirSync", "Camera bound to lifecycle");
-                } catch (Exception e) {
-                    Log.e("AirSync", "Camera initialization failed", e);
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Camera Error: " + e.getMessage(), Toast.LENGTH_LONG).show());
-                }
-            }, ContextCompat.getMainExecutor(this));
+                        CameraSelector cameraSelector = new CameraSelector.Builder()
+                                .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
+                                .build();
 
-        } catch (Exception e) {
-            Log.e("AirSync", "GestureDetector Init Failed", e);
-            e.printStackTrace();
-            Toast.makeText(this, "Model Load Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
+                        cameraProvider.unbindAll();
+                        cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
+                        
+                        runOnUiThread(() -> {
+                            gestureLabel.setText("Gesture: Ready");
+                            Toast.makeText(this, "Camera & AI Active", Toast.LENGTH_SHORT).show();
+                        });
+
+                    } catch (Exception e) {
+                        Log.e("AirSync", "Camera Binding Failed", e);
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Camera Error: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                    }
+                }, ContextCompat.getMainExecutor(this));
+
+            } catch (Exception e) {
+                Log.e("AirSync", "Camera Setup Failed", e);
+                runOnUiThread(() -> Toast.makeText(this, "Setup Error: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }, 800); // 800ms delay for handover
     }
 
     private void handleGesture(String gesture) {
@@ -236,7 +280,10 @@ public class MainActivity extends AppCompatActivity {
     private Bitmap toBitmap(androidx.camera.core.ImageProxy image) {
         try {
             androidx.camera.core.ImageProxy.PlaneProxy[] planes = image.getPlanes();
-            if (planes.length < 3) return null;
+            if (planes.length < 3) {
+                Log.w("AirSync", "Insufficient planes: " + planes.length);
+                return null;
+            }
             
             java.nio.ByteBuffer yBuffer = planes[0].getBuffer();
             java.nio.ByteBuffer uBuffer = planes[1].getBuffer();
@@ -273,7 +320,34 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean allPermissionsGranted() {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        for (String permission : REQUIRED_PERMISSIONS) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // Tell service to release camera
+        Intent intent = new Intent(this, AirSyncService.class);
+        intent.setAction(AirSyncService.ACTION_STOP_MONITORING);
+        startService(intent);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // Tell service to resume background monitoring
+        Intent intent = new Intent(this, AirSyncService.class);
+        intent.setAction(AirSyncService.ACTION_START_MONITORING);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
     }
 
     @Override
