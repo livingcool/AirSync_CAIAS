@@ -1,0 +1,274 @@
+package org.airsync;
+
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+import android.util.Log;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.Preview;
+import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.view.PreviewView;
+import androidx.camera.core.ImageProxy;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import com.google.common.util.concurrent.ListenableFuture;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class MainActivity extends AppCompatActivity {
+    private static final int PERMISSION_REQ_CODE = 10;
+    private static final int FILE_PICKER_CODE = 100;
+
+    private TextView statusLabel, IPLabel, gestureLabel;
+    private EditText ipInput;
+    private ProgressBar progressBar;
+    private PreviewView viewFinder;
+    private String selectedFilePath;
+    private TransferManager transferManager;
+    private GestureDetector gestureDetector;
+    private ExecutorService cameraExecutor;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        statusLabel = findViewById(R.id.statusLabel);
+        IPLabel = findViewById(R.id.ipLabel);
+        gestureLabel = findViewById(R.id.gestureLabel);
+        ipInput = findViewById(R.id.ipInput);
+        progressBar = findViewById(R.id.progressBar);
+        viewFinder = findViewById(R.id.viewFinder);
+
+        try {
+            transferManager = new TransferManager();
+            String myIp = transferManager.getMyIp();
+            IPLabel.setText("Your IP: " + (myIp != null ? myIp : "Unknown"));
+        } catch (Exception e) {
+            Log.e("AirSync", "IP Discovery Error", e);
+            IPLabel.setText("Your IP: Error");
+            e.printStackTrace();
+        }
+
+        findViewById(R.id.btnSelectFile).setOnClickListener(v -> pickFile());
+        findViewById(R.id.btnReceiveMode).setOnClickListener(v -> enterReceiveMode());
+
+        transferManager.setListener(new TransferManager.TransferListener() {
+            @Override
+            public void onFileReceived(String path) {
+                runOnUiThread(() -> statusLabel.setText("Received: " + path));
+            }
+
+            @Override
+            public void onProgressUpdate(int percent) {
+                runOnUiThread(() -> progressBar.setProgress(percent));
+            }
+        });
+
+        if (allPermissionsGranted()) {
+            Toast.makeText(this, "DEBUG: Permissions already granted", Toast.LENGTH_SHORT).show();
+            startCamera();
+        } else {
+            Toast.makeText(this, "DEBUG: Requesting permissions", Toast.LENGTH_SHORT).show();
+            ActivityCompat.requestPermissions(this, new String[]{
+                    Manifest.permission.CAMERA}, PERMISSION_REQ_CODE);
+        }
+
+        cameraExecutor = Executors.newSingleThreadExecutor();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQ_CODE) {
+            if (allPermissionsGranted()) {
+                startCamera();
+            } else {
+                Toast.makeText(this, "Camera permission is required for gesture detection", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void startCamera() {
+        Log.d("AirSync", "Initializing Camera and GestureDetector...");
+        try {
+            // Initialize GestureDetector (Standalone TFLite loads its own native library)
+            gestureDetector = new GestureDetector(this, "gesture_model.tflite", gesture -> {
+                runOnUiThread(() -> {
+                    gestureLabel.setText("Gesture: " + gesture);
+                    handleGesture(gesture);
+                });
+            });
+            Toast.makeText(this, "Model Loaded Successfully", Toast.LENGTH_SHORT).show();
+
+            // Start Camera Use Cases
+            ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+            cameraProviderFuture.addListener(() -> {
+                try {
+                    ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+
+                    Preview preview = new Preview.Builder().build();
+                    preview.setSurfaceProvider(viewFinder.getSurfaceProvider());
+
+                    ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build();
+
+                    imageAnalysis.setAnalyzer(cameraExecutor, image -> {
+                        Bitmap bitmap = toBitmap(image);
+                        if (bitmap != null) {
+                            if (gestureDetector != null) {
+                                final String result = gestureDetector.processFrame(bitmap);
+                                runOnUiThread(() -> {
+                                    if (result.startsWith("UNKNOWN")) {
+                                        gestureLabel.setText("Gesture: None");
+                                    } else {
+                                        gestureLabel.setText("Detected: " + result);
+                                    }
+                                });
+                            }
+                        }
+                        image.close();
+                    });
+
+                    CameraSelector cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA;
+                    cameraProvider.unbindAll();
+                    cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
+                    Log.d("AirSync", "Camera bound to lifecycle");
+                } catch (Exception e) {
+                    Log.e("AirSync", "Camera initialization failed", e);
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Camera Error: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                }
+            }, ContextCompat.getMainExecutor(this));
+
+        } catch (Exception e) {
+            Log.e("AirSync", "GestureDetector Init Failed", e);
+            e.printStackTrace();
+            Toast.makeText(this, "Model Load Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void handleGesture(String gesture) {
+        switch (gesture) {
+            case "SEND":
+                triggerSend();
+                break;
+            case "RECEIVE":
+                enterReceiveMode();
+                break;
+            case "CANCEL":
+                statusLabel.setText("Cancelled");
+                break;
+            case "CONFIRM":
+                statusLabel.setText("Confirmed!");
+                break;
+        }
+    }
+
+    private void pickFile() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*");
+        startActivityForResult(intent, FILE_PICKER_CODE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_PICKER_CODE && resultCode == RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            selectedFilePath = uri.getPath(); // Simplified; real path needs resolving
+            statusLabel.setText("File: " + selectedFilePath);
+        }
+    }
+
+    private void triggerSend() {
+        if (selectedFilePath == null) {
+            statusLabel.setText("No file selected!");
+            return;
+        }
+        String ip = ipInput.getText().toString().trim();
+        if (ip.isEmpty()) {
+            statusLabel.setText("Enter receiver IP first");
+            return;
+        }
+        statusLabel.setText("Sending to " + ip + "...");
+        transferManager.sendFile(ip, selectedFilePath);
+    }
+
+    private void enterReceiveMode() {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) {
+            statusLabel.setText("Storage Error: Files dir not found");
+            return;
+        }
+        statusLabel.setText("Waiting for file...");
+        transferManager.startReceiving(dir.getAbsolutePath());
+    }
+
+    private Bitmap toBitmap(androidx.camera.core.ImageProxy image) {
+        try {
+            androidx.camera.core.ImageProxy.PlaneProxy[] planes = image.getPlanes();
+            if (planes.length < 3) return null;
+            
+            java.nio.ByteBuffer yBuffer = planes[0].getBuffer();
+            java.nio.ByteBuffer uBuffer = planes[1].getBuffer();
+            java.nio.ByteBuffer vBuffer = planes[2].getBuffer();
+
+            int ySize = yBuffer.remaining();
+            int uSize = uBuffer.remaining();
+            int vSize = vBuffer.remaining();
+
+            byte[] nv21 = new byte[ySize + uSize + vSize];
+            yBuffer.get(nv21, 0, ySize);
+            vBuffer.get(nv21, ySize, vSize);
+            uBuffer.get(nv21, ySize + vSize, uSize);
+
+            android.graphics.YuvImage yuvImage = new android.graphics.YuvImage(nv21, android.graphics.ImageFormat.NV21, image.getWidth(), image.getHeight(), null);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            yuvImage.compressToJpeg(new android.graphics.Rect(0, 0, yuvImage.getWidth(), yuvImage.getHeight()), 100, out);
+            byte[] imageBytes = out.toByteArray();
+            Bitmap bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
+
+            // Handle Rotation and Mirroring
+            int rotation = image.getImageInfo().getRotationDegrees();
+            android.graphics.Matrix matrix = new android.graphics.Matrix();
+            matrix.postRotate(rotation);
+            
+            // Mirroring for Front Camera (Crucial for matching user gestures)
+            matrix.postScale(-1, 1, bitmap.getWidth() / 2f, bitmap.getHeight() / 2f);
+
+            return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        } catch (Exception e) {
+            Log.e("AirSync", "Bitmap conversion failed", e);
+            return null;
+        }
+    }
+
+    private boolean allPermissionsGranted() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        cameraExecutor.shutdown();
+    }
+}
