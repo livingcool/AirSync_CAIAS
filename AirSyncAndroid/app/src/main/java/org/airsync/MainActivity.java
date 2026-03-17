@@ -90,9 +90,12 @@ public class MainActivity extends AppCompatActivity {
 
         // Check for System Overlay Permission (Settings prompt)
         if (!android.provider.Settings.canDrawOverlays(this)) {
-            Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
+            Toast.makeText(this, "Please enable 'Display over other apps' for background gesture feedback (flashes).", Toast.LENGTH_LONG).show();
+            new android.os.Handler().postDelayed(() -> {
+                Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            }, 1000);
         }
 
         // Hide IP fields as Nearby doesn't need them
@@ -126,9 +129,7 @@ public class MainActivity extends AppCompatActivity {
 
         cameraExecutor = Executors.newSingleThreadExecutor();
 
-        if (allPermissionsGranted()) {
-            startCamera();
-        } else {
+        if (!allPermissionsGranted()) {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSION_REQ_CODE);
         }
     }
@@ -335,6 +336,11 @@ public class MainActivity extends AppCompatActivity {
         Intent intent = new Intent(this, AirSyncService.class);
         intent.setAction(AirSyncService.ACTION_STOP_MONITORING);
         startService(intent);
+
+        // Re-bind camera for Foreground usage
+        if (allPermissionsGranted()) {
+            startCamera();
+        }
     }
 
     @Override

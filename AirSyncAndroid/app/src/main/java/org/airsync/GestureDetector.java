@@ -17,10 +17,12 @@ public class GestureDetector {
     private GestureRecognizer gestureRecognizer;
     private final OnGestureListener listener;
     
-    private enum State { IDLE, OPEN_PALM, CLOSED_FIST }
+    private enum State { IDLE, PALM_DETECTED, FIST_DETECTED }
     private State currentState = State.IDLE;
-    private long lastStateChangeTime = 0;
-    private static final long GESTURE_WINDOW_MS = 1200; // Increased for better tolerance
+    private long lastTriggerTime = 0;
+    private long stateEntryTime = 0;
+    private static final long GESTURE_WINDOW_MS = 1500;
+    private static final long COOLDOWN_MS = 3000;
 
     public interface OnGestureListener {
         void onGestureDetected(String gesture);
@@ -54,51 +56,58 @@ public class GestureDetector {
         String gestureLabel = "NONE";
         if (result.gestures() != null && !result.gestures().isEmpty()) {
             gestureLabel = result.gestures().get(0).get(0).categoryName();
-            Log.d("AirSync", "MediaPipe Label: " + gestureLabel);
-            analyzeTransitions(gestureLabel);
+            analyzeMotion(gestureLabel);
         }
 
-        return gestureLabel + " | State: " + currentState.name();
+        return gestureLabel + " | Motion: " + currentState.name();
     }
 
-    private void analyzeTransitions(String label) {
+    private void analyzeMotion(String label) {
+        long currentTime = System.currentTimeMillis();
+        
+        // Cooldown check: Prevent accidental multiple triggers
+        if (currentTime - lastTriggerTime < COOLDOWN_MS) {
+            return;
+        }
+
         boolean isOpen = label.equalsIgnoreCase("Open_Palm");
         boolean isClosed = label.equalsIgnoreCase("Closed_Fist");
-        long currentTime = System.currentTimeMillis();
 
         switch (currentState) {
             case IDLE:
                 if (isOpen) {
-                    currentState = State.OPEN_PALM;
-                    lastStateChangeTime = currentTime;
+                    currentState = State.PALM_DETECTED;
+                    stateEntryTime = currentTime;
+                    Log.d("AirSync", "Motion Start: Palm Detected");
                 } else if (isClosed) {
-                    currentState = State.CLOSED_FIST;
-                    lastStateChangeTime = currentTime;
+                    currentState = State.FIST_DETECTED;
+                    stateEntryTime = currentTime;
+                    Log.d("AirSync", "Motion Start: Fist Detected");
                 }
                 break;
 
-            case OPEN_PALM:
+            case PALM_DETECTED:
                 if (isClosed) {
-                    // Transition: OPEN -> CLOSED within window = GRAB
-                    if (currentTime - lastStateChangeTime < GESTURE_WINDOW_MS) {
+                    // Sequence: PALM -> FIST = GRAB
+                    if (currentTime - stateEntryTime < GESTURE_WINDOW_MS) {
                         triggerGesture("GRAB");
+                        lastTriggerTime = currentTime;
                     }
-                    currentState = State.CLOSED_FIST;
-                    lastStateChangeTime = currentTime;
-                } else if (!isOpen) {
+                    currentState = State.IDLE;
+                } else if (!isOpen && (currentTime - stateEntryTime > GESTURE_WINDOW_MS)) {
                     currentState = State.IDLE;
                 }
                 break;
 
-            case CLOSED_FIST:
+            case FIST_DETECTED:
                 if (isOpen) {
-                    // Transition: CLOSED -> OPEN within window = RELEASE
-                    if (currentTime - lastStateChangeTime < GESTURE_WINDOW_MS) {
+                    // Sequence: FIST -> PALM = RELEASE
+                    if (currentTime - stateEntryTime < GESTURE_WINDOW_MS) {
                         triggerGesture("RELEASE");
+                        lastTriggerTime = currentTime;
                     }
-                    currentState = State.OPEN_PALM;
-                    lastStateChangeTime = currentTime;
-                } else if (!isClosed) {
+                    currentState = State.IDLE;
+                } else if (!isClosed && (currentTime - stateEntryTime > GESTURE_WINDOW_MS)) {
                     currentState = State.IDLE;
                 }
                 break;
@@ -106,7 +115,7 @@ public class GestureDetector {
     }
 
     private void triggerGesture(String gesture) {
-        Log.d("AirSync", "Triggered Gesture: " + gesture);
+        Log.d("AirSync", "MATCHED MOTION: " + gesture);
         if (listener != null) {
             listener.onGestureDetected(gesture);
         }

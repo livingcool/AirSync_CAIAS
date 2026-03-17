@@ -16,10 +16,15 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
 import com.google.common.util.concurrent.ListenableFuture;
-import android.graphics.Bitmap;
-import android.graphics.Matrix;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import android.os.Handler;
+import android.os.Looper;
+import android.graphics.Bitmap;
+import android.graphics.Matrix;
+import android.provider.MediaStore;
+import android.database.Cursor;
+import java.io.File;
 
 public class AirSyncService extends LifecycleService {
     private static final String CHANNEL_ID = "AirSyncGestureService";
@@ -114,6 +119,14 @@ public class AirSyncService extends LifecycleService {
         if (gesture.equals("GRAB")) {
             Log.d("AirSync", "GRAB detected - Visualizing and Advertising...");
             showSystemOverlayAnimation(0xFFBB86FC); // Purple Flash
+            
+            // Magical Grab Logic: Find latest media if in background
+            File latestFile = getLatestMediaFile();
+            if (latestFile != null && latestFile.exists()) {
+                Log.d("AirSync", "Magical Grab! Auto-selected: " + latestFile.getAbsolutePath());
+                nearbyManager.sendFile(latestFile); 
+            }
+            
             nearbyManager.startAdvertising();
         } else if (gesture.equals("RELEASE")) {
             Log.d("AirSync", "RELEASE detected - Visualizing and Discovering...");
@@ -122,43 +135,69 @@ public class AirSyncService extends LifecycleService {
         }
     }
 
+    private File getLatestMediaFile() {
+        String[] projection = { MediaStore.Images.Media.DATA, MediaStore.Images.Media.DATE_ADDED };
+        String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
+        
+        Cursor cursor = getContentResolver().query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                sortOrder
+        );
+
+        if (cursor != null && cursor.moveToFirst()) {
+            String filePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
+            cursor.close();
+            return new File(filePath);
+        }
+        
+        if (cursor != null) cursor.close();
+        return null;
+    }
+
     private void showSystemOverlayAnimation(int color) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
                 !android.provider.Settings.canDrawOverlays(this)) {
+            Log.w("AirSync", "Cannot show overlay: SYSTEM_ALERT_WINDOW permission missing!");
             return;
         }
 
-        final android.view.WindowManager windowManager = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
-        if (windowManager == null) return;
+        new Handler(Looper.getMainLooper()).post(() -> {
+            final android.view.WindowManager windowManager = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
+            if (windowManager == null) return;
 
-        final android.view.View overlay = new android.view.View(this);
-        overlay.setBackgroundColor(color);
-        overlay.setAlpha(0.4f);
+            final android.view.View overlay = new android.view.View(this);
+            overlay.setBackgroundColor(color);
+            overlay.setAlpha(0.6f); // Slightly more visible
 
-        int type = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O ?
-                android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
-                android.view.WindowManager.LayoutParams.TYPE_PHONE;
+            int type = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O ?
+                    android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                    android.view.WindowManager.LayoutParams.TYPE_PHONE;
 
-        final android.view.WindowManager.LayoutParams params = new android.view.WindowManager.LayoutParams(
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                type,
-                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
-                        android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                android.graphics.PixelFormat.TRANSLUCENT
-        );
+            final android.view.WindowManager.LayoutParams params = new android.view.WindowManager.LayoutParams(
+                    android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                    android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                    type,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
+                            android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                            android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    android.graphics.PixelFormat.TRANSLUCENT
+            );
 
-        try {
-            windowManager.addView(overlay, params);
-            overlay.animate().alpha(0f).setDuration(600).withEndAction(() -> {
-                try {
-                    windowManager.removeView(overlay);
-                } catch (Exception ignored) {}
-            });
-        } catch (Exception e) {
-            Log.e("AirSync", "Overlay failed", e);
-        }
+            try {
+                windowManager.addView(overlay, params);
+                overlay.animate().alpha(0f).setDuration(800).withEndAction(() -> {
+                    try {
+                        windowManager.removeView(overlay);
+                    } catch (Exception ignored) {}
+                });
+            } catch (Exception e) {
+                Log.e("AirSync", "Overlay failed", e);
+            }
+        });
     }
 
     private Bitmap toBitmap(androidx.camera.core.ImageProxy image) {

@@ -29,6 +29,8 @@
         android:allowBackup="true"
         android:label="AirSync"
         android:supportsRtl="true"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
         <service 
