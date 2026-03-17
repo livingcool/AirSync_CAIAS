@@ -26,9 +26,14 @@ public class TransferManager {
     public void sendFile(String hostIp, String filePath) {
         executor.execute(() -> {
             File file = new File(filePath);
+            if (!file.exists()) {
+                Log.e("AirSync", "File does not exist: " + filePath);
+                return;
+            }
             long fileSize = file.length();
             String fileName = file.getName();
 
+            Log.d("AirSync", "Attempting to send " + fileName + " to " + hostIp);
             try (Socket socket = new Socket()) {
                 socket.connect(new InetSocketAddress(hostIp, TRANSFER_PORT), 10000);
                 DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
@@ -45,11 +50,13 @@ public class TransferManager {
                 while ((read = fis.read(buffer)) != -1) {
                     dos.write(buffer, 0, read);
                     sent += read;
-                    int progress = (int) ((sent * 100) / fileSize);
+                    final int progress = (int) ((sent * 100) / fileSize);
                     mainHandler.post(() -> listener.onProgressUpdate(progress));
                 }
                 dos.flush();
+                Log.d("AirSync", "File sent successfully!");
             } catch (IOException e) {
+                Log.e("AirSync", "Send failed: " + e.getMessage());
                 e.printStackTrace();
             }
         });
@@ -57,8 +64,12 @@ public class TransferManager {
 
     public void startReceiving(String saveDir) {
         executor.execute(() -> {
+            Log.d("AirSync", "Starting server on port " + TRANSFER_PORT);
             try (ServerSocket serverSocket = new ServerSocket(TRANSFER_PORT)) {
+                serverSocket.setSoTimeout(0); // Wait indefinitely
                 Socket clientSocket = serverSocket.accept();
+                Log.d("AirSync", "Client connected from " + clientSocket.getInetAddress());
+                
                 DataInputStream dis = new DataInputStream(clientSocket.getInputStream());
 
                 int headerLen = dis.readInt();
@@ -69,6 +80,7 @@ public class TransferManager {
                 String fileName = parts[0];
                 long fileSize = Long.parseLong(parts[1]);
 
+                Log.d("AirSync", "Receiving: " + fileName + " (" + fileSize + " bytes)");
                 File file = new File(saveDir, fileName);
                 try (FileOutputStream fos = new FileOutputStream(file)) {
                     byte[] buffer = new byte[BUFFER_SIZE];
@@ -77,12 +89,14 @@ public class TransferManager {
                     while (received < fileSize && (read = dis.read(buffer, 0, (int) Math.min(buffer.length, fileSize - received))) != -1) {
                         fos.write(buffer, 0, read);
                         received += read;
-                        int progress = (int) ((received * 100) / fileSize);
+                        final int progress = (int) ((received * 100) / fileSize);
                         mainHandler.post(() -> listener.onProgressUpdate(progress));
                     }
                 }
+                Log.d("AirSync", "File received: " + file.getAbsolutePath());
                 mainHandler.post(() -> listener.onFileReceived(file.getAbsolutePath()));
             } catch (IOException e) {
+                Log.e("AirSync", "Receive error: " + e.getMessage());
                 e.printStackTrace();
             }
         });

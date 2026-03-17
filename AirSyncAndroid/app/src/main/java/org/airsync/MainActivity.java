@@ -110,14 +110,14 @@ public class MainActivity extends AppCompatActivity {
     private void startCamera() {
         Log.d("AirSync", "Initializing Camera and GestureDetector...");
         try {
-            // Initialize GestureDetector (Standalone TFLite loads its own native library)
-            gestureDetector = new GestureDetector(this, "gesture_model.tflite", gesture -> {
+            // Initialize MediaPipe GestureDetector
+            gestureDetector = new GestureDetector(this, gesture -> {
                 runOnUiThread(() -> {
                     gestureLabel.setText("Gesture: " + gesture);
                     handleGesture(gesture);
                 });
             });
-            Toast.makeText(this, "Model Loaded Successfully", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "MediaPipe Model Loaded", Toast.LENGTH_SHORT).show();
 
             // Start Camera Use Cases
             ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
@@ -136,12 +136,12 @@ public class MainActivity extends AppCompatActivity {
                         Bitmap bitmap = toBitmap(image);
                         if (bitmap != null) {
                             if (gestureDetector != null) {
-                                final String result = gestureDetector.processFrame(bitmap);
+                                final String debugResult = gestureDetector.processFrame(bitmap);
                                 runOnUiThread(() -> {
-                                    if (result.startsWith("UNKNOWN")) {
+                                    if (debugResult.startsWith("UNKNOWN")) {
                                         gestureLabel.setText("Gesture: None");
                                     } else {
-                                        gestureLabel.setText("Detected: " + result);
+                                        gestureLabel.setText("Detected: " + debugResult);
                                     }
                                 });
                             }

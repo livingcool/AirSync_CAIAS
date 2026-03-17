@@ -110,18 +110,16 @@ class AirSyncApp(App):
             return
         ip = self.ip_input.text.strip()
         if not ip:
-            self.status_label.text = "Enter receiver IP first"
+            self.status_label.text = "Enter phone IP first"
             return
         self.status_label.text = f"Sending to {ip}..."
         self.transfer_manager.send_file(ip, self.selected_file)
 
     def _enter_receive_mode(self):
-        self.status_label.text = "Waiting for file..."
-        # On Android, we should save to Download or similar. On laptop, current dir.
-        save_dir = "."
-        if os.name == 'posix' and 'ANDROID_ARGUMENT' in os.environ:
-             save_dir = "/sdcard/Download"
-        
+        # On laptop, save to Downloads
+        save_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        os.makedirs(save_dir, exist_ok=True)
+        self.status_label.text = f"Listening on {self.transfer_manager.get_my_ip()}..."
         self.transfer_manager.start_receiving(save_dir=save_dir)
 
     def _file_received(self, path):

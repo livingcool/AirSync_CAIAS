@@ -40,26 +40,39 @@ class TransferManager:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
                     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     server.bind(("0.0.0.0", TRANSFER_PORT))
-                    server.listen(1)
-                    conn, _ = server.accept()
-                    with conn:
-                        header_len = int.from_bytes(conn.recv(4), "big")
-                        header     = conn.recv(header_len).decode()
-                        filename, filesize = header.split("|")
-                        filesize   = int(filesize)
-                        save_path  = os.path.join(save_dir, filename)
-                        received   = 0
-                        with open(save_path, "wb") as f:
-                            while received < filesize:
-                                chunk = conn.recv(min(BUFFER_SIZE, filesize - received))
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                                received += len(chunk)
-                                if self.on_progress_update:
-                                    self.on_progress_update(int(received / filesize * 100))
-                        if self.on_file_received:
-                            self.on_file_received(save_path)
+                    server.listen(5)
+                    print(f"[Server] Listening on port {TRANSFER_PORT}...")
+                    
+                    while True:
+                        conn, addr = server.accept()
+                        print(f"[Server] Connection from {addr}")
+                        with conn:
+                            # Read header length (4 bytes)
+                            raw_len = conn.recv(4)
+                            if not raw_len: continue
+                            header_len = int.from_bytes(raw_len, "big")
+                            
+                            # Read header
+                            header = conn.recv(header_len).decode()
+                            filename, filesize = header.split("|")
+                            filesize = int(filesize)
+                            
+                            save_path = os.path.join(save_dir, filename)
+                            print(f"[Server] Receiving {filename} ({filesize} bytes)...")
+                            
+                            received = 0
+                            with open(save_path, "wb") as f:
+                                while received < filesize:
+                                    chunk = conn.recv(min(65536, filesize - received))
+                                    if not chunk: break
+                                    f.write(chunk)
+                                    received += len(chunk)
+                                    if self.on_progress_update:
+                                        self.on_progress_update(int(received / filesize * 100))
+                            
+                            print(f"[Server] Saved to {save_path}")
+                            if self.on_file_received:
+                                self.on_file_received(save_path)
             except Exception as e:
                 print(f"Receive error: {e}")
         threading.Thread(target=_listen, daemon=True).start()
